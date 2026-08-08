@@ -5,7 +5,7 @@
 FROM runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404
 ENV DEBIAN_FRONTEND=noninteractive
 ARG TRT_TAG=v1.2.1
-ARG CKPT_URL=https://github.com/Soonyata/whisper-trt-worker/releases/download/v0.1.0/ckpt_turbo_int8.tgz
+ARG CKPT_BASE=https://github.com/Soonyata/whisper-trt-worker/releases/download/v0.1.0
 
 RUN apt-get update -qq && apt-get install -y -qq libopenmpi3 openmpi-bin ffmpeg wget \
     && rm -rf /var/lib/apt/lists/*
@@ -26,7 +26,8 @@ RUN mkdir -p /opt/whisper-example/assets && cd /opt/whisper-example \
          wget -q "https://raw.githubusercontent.com/NVIDIA/TensorRT-LLM/${TRT_TAG}/examples/models/core/whisper/$F"; done \
     && wget -q -P assets https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/multilingual.tiktoken \
     && wget -q -P assets https://raw.githubusercontent.com/openai/whisper/main/whisper/assets/mel_filters.npz \
-    && wget -qO- "$CKPT_URL" | tar xz \
+    && for P in aa ab ac ad ae; do wget -q "$CKPT_BASE/ckpt_part_$P"; done \
+    && cat ckpt_part_* | tar xz && rm -f ckpt_part_* \
     && test -d ckpt_turbo_int8/encoder
 
 COPY turbo_trt_worker.py /opt/turbo_trt_worker.py

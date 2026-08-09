@@ -5,6 +5,10 @@
 # set NV_ENGINE_CACHE=/runpod-volume/engines to reuse builds across same-arch workers (pins the
 # endpoint to one datacenter; only adopt if BOOT_METRICS shows boot-storms matter).
 set -u
+# INSTRUMENTATION (temporary, staged for silent-crash diagnosis): trace every line to stdout,
+# and on any exit hold the container 120s so worker logs can be read before the restart loop.
+set -x
+trap 'code=$?; echo "BOOT_EXIT code=$code"; sleep 120' EXIT
 export LD_LIBRARY_PATH="/usr/local/lib/python3.12/dist-packages/nvidia/cu13/lib:${LD_LIBRARY_PATH:-}"
 CKPT="${CKPT_DIR:-/opt/whisper-example/ckpt_turbo_int8}"
 EX="${EXAMPLE_DIR:-/opt/whisper-example}"

@@ -16,7 +16,7 @@ RUN apt-get update -qq && apt-get install -y -qq libopenmpi3 openmpi-bin ffmpeg 
 RUN pip install --break-system-packages --no-cache-dir tensorrt_llm \
     && for P in nvidia-cublas nvidia-cufft nvidia-curand nvidia-cusolver nvidia-cusparse nvidia-nvjitlink nvidia-cuda-nvcc; do \
          pip install --break-system-packages --no-cache-dir "$P" || true; done \
-    && pip install --break-system-packages --no-cache-dir openai-whisper kaldialign soundfile silero-vad runpod \
+    && pip install --break-system-packages --no-cache-dir --ignore-installed openai-whisper kaldialign soundfile silero-vad runpod \
     && pip install --break-system-packages --no-cache-dir "torch==2.9.*" "torchaudio==2.9.*" "triton==3.5.1"
 
 # Vendored inference scripts from the NVIDIA TensorRT-LLM whisper example (Apache-2.0),

@@ -68,6 +68,13 @@ def main():
 
     q = queue.Queue(maxsize=max(1, a.ahead))
 
+    # silero's torch-JIT model is NOT safe for concurrent init/forward across threads
+    # (v2 validation segfaulted, exit 139): warm it once on the main thread, then
+    # serialize VAD behind a lock. Fetch+decode still overlap; VAD ~25s/ep serialized
+    # still feeds a ~12s/ep GPU at ~240x sustained.
+    W._vad()
+    vad_lock = threading.Lock()
+
     def prep(ep):
         wav = os.path.join(wavdir, ep["guid"] + ".wav")
         t0 = time.time()
@@ -82,11 +89,13 @@ def main():
             wave = wave.mean(axis=1)
         assert sr == 16000, f"bad sr {sr}"
         dur = len(wave) / sr
-        chunks = W._speech_chunks(wave)
+        with vad_lock:
+            chunks = W._speech_chunks(wave)
         os.remove(wav)
         return ep, dur, chunks, fetch_s, round(time.time() - t1, 1)
 
     def producer():
+        print("PRODUCER_START", flush=True)
         with _cf.ThreadPoolExecutor(max_workers=max(1, a.ahead)) as ex_pool:
             futs = {ex_pool.submit(prep, ep): ep for ep in todo}
             for fut in _cf.as_completed(futs):

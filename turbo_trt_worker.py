@@ -50,11 +50,48 @@ _MODEL = None
 _VAD = None
 
 
+def _ensure_engines():
+    """Lazy per-arch engine build (first request pays ~30-60s ONCE per worker; the platform
+    waits inside a claimed job by contract — unlike boot time, which serverless kills)."""
+    import subprocess, time as _t
+    import torch
+    arch = "sm%d%d" % torch.cuda.get_device_capability()
+    base = os.environ.get("ENGINE_BASE", "/engines")
+    eng = os.path.join(base, arch)
+    cache = os.environ.get("NV_ENGINE_CACHE")
+    if cache and os.path.exists(os.path.join(cache, arch, "encoder", "rank0.engine")):
+        return os.path.join(cache, arch)
+    if not os.path.exists(os.path.join(eng, "encoder", "rank0.engine")):
+        ckpt = os.environ.get("CKPT_DIR", "/opt/whisper-example/ckpt_turbo_int8")
+        t0 = _t.time()
+        os.makedirs(eng, exist_ok=True)
+        subprocess.run(["trtllm-build", "--checkpoint_dir", f"{ckpt}/encoder",
+                        "--output_dir", f"{eng}/encoder", "--moe_plugin", "disable",
+                        "--max_batch_size", "32", "--gemm_plugin", "disable",
+                        "--bert_attention_plugin", "float16",
+                        "--max_input_len", "3000", "--max_seq_len=3000"],
+                       check=True, capture_output=True, timeout=600)
+        subprocess.run(["trtllm-build", "--checkpoint_dir", f"{ckpt}/decoder",
+                        "--output_dir", f"{eng}/decoder", "--moe_plugin", "disable",
+                        "--max_beam_width", "4", "--max_batch_size", "32",
+                        "--max_seq_len", "200", "--max_input_len", "14",
+                        "--max_encoder_input_len", "3000", "--gemm_plugin", "float16",
+                        "--bert_attention_plugin", "float16", "--gpt_attention_plugin", "float16"],
+                       check=True, capture_output=True, timeout=600)
+        print(f"ENGINE_BUILD_METRICS arch={arch} build_s={_t.time()-t0:.0f}", flush=True)
+        if cache:
+            import shutil
+            os.makedirs(cache, exist_ok=True)
+            shutil.copytree(eng, os.path.join(cache, arch), dirs_exist_ok=True)
+    return eng
+
+
 def _model():
     global _MODEL
     if _MODEL is None:
+        eng = _ensure_engines()
         from run import WhisperTRTLLM                      # TRT-LLM example (version-matched)
-        _MODEL = WhisperTRTLLM(ENGINE_DIR, False, os.path.join(EXAMPLE_DIR, "assets"),
+        _MODEL = WhisperTRTLLM(eng, False, os.path.join(EXAMPLE_DIR, "assets"),
                                batch_size=BATCH, use_py_session=False, num_beams=1)
     return _MODEL
 

@@ -65,19 +65,23 @@ def _ensure_engines():
         ckpt = os.environ.get("CKPT_DIR", "/opt/whisper-example/ckpt_turbo_int8")
         t0 = _t.time()
         os.makedirs(eng, exist_ok=True)
-        subprocess.run(["trtllm-build", "--checkpoint_dir", f"{ckpt}/encoder",
-                        "--output_dir", f"{eng}/encoder", "--moe_plugin", "disable",
-                        "--max_batch_size", "32", "--gemm_plugin", "disable",
-                        "--bert_attention_plugin", "float16",
-                        "--max_input_len", "3000", "--max_seq_len=3000"],
-                       check=True, capture_output=True, timeout=600)
-        subprocess.run(["trtllm-build", "--checkpoint_dir", f"{ckpt}/decoder",
-                        "--output_dir", f"{eng}/decoder", "--moe_plugin", "disable",
-                        "--max_beam_width", "4", "--max_batch_size", "32",
-                        "--max_seq_len", "200", "--max_input_len", "14",
-                        "--max_encoder_input_len", "3000", "--gemm_plugin", "float16",
-                        "--bert_attention_plugin", "float16", "--gpt_attention_plugin", "float16"],
-                       check=True, capture_output=True, timeout=600)
+        def _build(tag, args):
+            r = subprocess.run(["trtllm-build"] + args, capture_output=True, text=True, timeout=600)
+            if r.returncode != 0:
+                tail = (r.stderr or r.stdout or "")[-1500:]
+                print(f"TRTLLM_BUILD_FAIL {tag}: {tail}", flush=True)
+                raise RuntimeError(f"{tag} engine build failed: ...{tail[-400:]}")
+        _build("encoder", ["--checkpoint_dir", f"{ckpt}/encoder",
+                           "--output_dir", f"{eng}/encoder", "--moe_plugin", "disable",
+                           "--max_batch_size", "32", "--gemm_plugin", "disable",
+                           "--bert_attention_plugin", "float16",
+                           "--max_input_len", "3000", "--max_seq_len=3000"])
+        _build("decoder", ["--checkpoint_dir", f"{ckpt}/decoder",
+                           "--output_dir", f"{eng}/decoder", "--moe_plugin", "disable",
+                           "--max_beam_width", "4", "--max_batch_size", "32",
+                           "--max_seq_len", "200", "--max_input_len", "14",
+                           "--max_encoder_input_len", "3000", "--gemm_plugin", "float16",
+                           "--bert_attention_plugin", "float16", "--gpt_attention_plugin", "float16"])
         print(f"ENGINE_BUILD_METRICS arch={arch} build_s={_t.time()-t0:.0f}", flush=True)
         if cache:
             import shutil

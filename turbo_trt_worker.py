@@ -11,11 +11,15 @@ Contract (identical to serverless/turbo_worker.py lean CT2 worker):
 
 Pipeline: silero-VAD speech spans → greedy-pack into ≤30s chunks (REAL start offsets = segment
 timestamps; silence skipped entirely — faster AND no hallucination fodder) → GPU log-mels →
-WhisperTRTLLM.process_batch (batch 16, greedy, C++ IFB) → special-token strip → canonical segments.
+WhisperTRTLLM.process_batch (batch TRT_BATCH=32 in the image, greedy, C++ IFB) → special-token strip → canonical segments.
 
-Env: ENGINE_DIR (default /engines/eng_turbo_int8) · EXAMPLE_DIR (default /opt/whisper-example —
-must hold run.py/whisper_utils.py/assets from TRT-LLM tag matching the installed wheel; see
-build_turbo_engines.sh) · TRT_BATCH (16) · TRT_MAX_NEW_TOKENS (190; gate-3 watches truncation).
+Env: ENGINE_BASE (default /engines — per-arch subdirs, lazily built via _ensure_engines; legacy
+ENGINE_DIR path unused in the NGC image) · CKPT_DIR · EXAMPLE_DIR (default /opt/whisper-example —
+must hold run.py/whisper_utils.py/assets from the TRT-LLM tag matching the installed wheel) ·
+TRT_BATCH (32 in the image) · TRT_MAX_NEW_TOKENS (190; truncation watched via cap_flagged) ·
+NV_ENGINE_CACHE (optional prebuilt-engine cache dir). transcribe_core(pre=(dur,chunks)) lets a
+batch harness precompute VAD off-thread; the torchaudio stub at import time is a hard requirement
+of the NGC base (see comment).
 
 Gate-A numbers this productionizes: 9.7s / 92-min ep on a 3090 (568x RT, $0.00039/audio-hr),
 word-identical spot-checks vs CT2. STAGE-B VALIDATED 2026-08-08: 10.2s/543x (b32 engines 9.8s/563x),

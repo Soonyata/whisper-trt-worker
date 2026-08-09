@@ -11,3 +11,7 @@ timestamped segments. Measured ~540–570× real-time on an RTX 3090 for long-fo
 
 Built on the [NVIDIA TensorRT-LLM](https://github.com/NVIDIA/TensorRT-LLM) whisper example
 (Apache-2.0), pinned to the tag matching the installed wheel. Whisper by OpenAI.
+
+Also in this repo: **** — a pod-batch harness (prefetch pool for fetch/decode/VAD,
+resume ledger,  for multi-pod fan-out) that drives the same worker on rented pods
+for large backlogs, where per-episode transcribe runs ~490-530× real-time.

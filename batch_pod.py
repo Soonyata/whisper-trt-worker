@@ -38,6 +38,8 @@ def main():
     ap.add_argument("--out", default="out")
     ap.add_argument("--ahead", type=int, default=2, help="prefetch depth (episodes decoded ahead)")
     ap.add_argument("--language", default="en")
+    ap.add_argument("--s3-sync", action="store_true",
+                    help="push transcripts + per-shard ledger to RunPod S3 (env: RUNPOD_S3_*)")
     a = ap.parse_args()
     shard_i, shard_n = (int(x) for x in a.shard.split("/"))
 
@@ -59,6 +61,30 @@ def main():
                 pass
     todo = [e for e in eps if e["guid"] not in done]
     print(f"BATCH_POD shard={a.shard} episodes={len(eps)} done={len(done)} todo={len(todo)}", flush=True)
+
+    # S3 sync (Stage E2): creds/endpoint arrive via platform-injected env (NEVER exported in the
+    # set -x bootstrap — they would be traced into pod logs). Per-shard ledger key avoids
+    # cross-pod clobber in multi-pod runs. Sync failures log once per event, never sink the batch.
+    s3 = s3_bucket = s3_prefix = None
+    ledger_key = None
+    if a.s3_sync:
+        import boto3
+        s3 = boto3.client("s3", endpoint_url=os.environ["RUNPOD_S3_ENDPOINT"],
+                          region_name=os.environ.get("RUNPOD_S3_REGION", ""),
+                          aws_access_key_id=os.environ["RUNPOD_S3_ACCESS_KEY"],
+                          aws_secret_access_key=os.environ["RUNPOD_S3_SECRET"])
+        s3_bucket = os.environ["RUNPOD_S3_BUCKET"]
+        s3_prefix = os.environ.get("RUNPOD_S3_PREFIX", "batch")
+        ledger_key = f"{s3_prefix}/ledger-{shard_i}of{shard_n}.jsonl"
+        print(f"S3_SYNC on bucket={s3_bucket} prefix={s3_prefix}", flush=True)
+
+    def s3_push(local_path, key):
+        if s3 is None:
+            return
+        try:
+            s3.upload_file(local_path, s3_bucket, key)
+        except Exception as ex:  # noqa: BLE001
+            print(f"S3_SYNC_ERR {key}: {type(ex).__name__} {str(ex)[:120]}", flush=True)
 
     # Prefetch pipeline: fetch + decode + VAD all happen on CPU worker threads, so the GPU
     # only ever sees ready-chunked audio. Queue holds (ep, dur, chunks, fetch_s, vad_s);
@@ -153,10 +179,13 @@ def main():
                          "words": words, "segs": len(rec["segments"]), "fetch_s": fetch_s,
                          "vad_s": vad_s, "transcribe_s": timing.get("transcribe_s"),
                          "rt_x": timing.get("rt_factor"), "cap_flagged": timing.get("cap_flagged")})
+            s3_push(os.path.join(a.out, ep["guid"] + ".json"), f"{s3_prefix}/{ep['guid']}.json" if s3_prefix else "")
+            s3_push(ledger, ledger_key)
         except Exception as ex:  # noqa: BLE001
             n_err += 1
             led(ledger, {"guid": ep["guid"], "status": "transcribe_error", "error": str(ex)[:300]})
     wall = time.time() - t_start
+    s3_push(ledger, ledger_key)
     print(f"BATCH_DONE ok={n_ok} err={n_err} audio_hrs={audio_s/3600:.2f} wall_s={wall:.0f} "
           f"sustained_rt={audio_s/max(wall,1):.0f}x", flush=True)
 

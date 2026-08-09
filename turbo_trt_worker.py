@@ -29,7 +29,19 @@ import os
 import re
 import sys
 import time
+import types
 import urllib.request
+
+# The NGC release image ships no torchaudio, and installing one replaces NVIDIA's custom
+# torch build (ABI break — G1 failure 2026-08-09). silero_vad imports torchaudio at module
+# level but touches it only inside read_audio/save_audio, which this worker never calls
+# (audio is decoded via ffmpeg+soundfile). A stub satisfies the import.
+try:
+    import torchaudio  # noqa: F401
+except ImportError:
+    _ta = types.ModuleType("torchaudio")
+    _ta.__version__ = "0.0.0+stub"
+    sys.modules["torchaudio"] = _ta
 
 EXAMPLE_DIR = os.environ.get("EXAMPLE_DIR", "/opt/whisper-example")
 ENGINE_DIR = os.environ.get("ENGINE_DIR", "/engines/eng_turbo_int8")

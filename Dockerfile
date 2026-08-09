@@ -31,8 +31,8 @@ RUN rm -rf /usr/local/lib/python3.12/dist-packages/torch \
            /usr/local/lib/python3.12/dist-packages/triton \
            /usr/local/lib/python3.12/dist-packages/triton-*.dist-info \
            /usr/local/lib/python3.12/dist-packages/pytorch_triton* \
-    && pip install --break-system-packages --no-cache-dir "torch==2.9.*" "torchaudio==2.9.*" "torchvision==0.24.*" "triton==3.5.1" pillow \
-    && python3 -c "import torch; assert torch.__version__.startswith('2.9'), torch.__version__; import torch._inductor.lowering, torchvision; print('TORCH_CLEAN_OK', torch.__version__, torchvision.__version__)"
+    && pip install --break-system-packages --no-cache-dir "torch==2.9.*" "torchaudio==2.9.*" "torchvision==0.24.*" "triton==3.5.1" pillow "numpy<2" \
+    && python3 -c "import torch; assert torch.__version__.startswith('2.9'), torch.__version__; import torch._inductor.lowering, torchvision, numpy; assert numpy.__version__.startswith('1.'), numpy.__version__; print('TORCH_CLEAN_OK', torch.__version__, torchvision.__version__, 'numpy', numpy.__version__)"
 
 # Vendored inference scripts from the NVIDIA TensorRT-LLM whisper example (Apache-2.0),
 # pinned to the tag matching the installed wheel + whisper assets + the converted checkpoint.

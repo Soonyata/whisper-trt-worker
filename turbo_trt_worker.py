@@ -149,20 +149,27 @@ def _strip(text):
     return re.sub(r"<\|[^|]*\|>", "", str(text)).strip()
 
 
-def transcribe_core(audio_path, language="en"):
-    """audio file → canonical segments + timing report. The single testable unit."""
-    import soundfile as sf
+def transcribe_core(audio_path, language="en", pre=None):
+    """audio file → canonical segments + timing report. The single testable unit.
+
+    pre=(dur, chunks): precomputed duration + VAD chunks (from _speech_chunks) — lets a
+    batch harness run fetch/decode/VAD on CPU threads while the GPU transcribes the
+    previous episode. audio_path is ignored when pre is given."""
     import torch
     from whisper_utils import log_mel_spectrogram
 
-    wave, sr = sf.read(audio_path, dtype="float32")
-    if wave.ndim > 1:
-        wave = wave.mean(axis=1)
-    assert sr == SR, f"expected 16k mono wav-decodable input, got sr={sr}"
-    dur = len(wave) / SR
+    if pre is not None:
+        dur, chunks = pre
+    else:
+        import soundfile as sf
+        wave, sr = sf.read(audio_path, dtype="float32")
+        if wave.ndim > 1:
+            wave = wave.mean(axis=1)
+        assert sr == SR, f"expected 16k mono wav-decodable input, got sr={sr}"
+        dur = len(wave) / SR
+        chunks = _speech_chunks(wave)
 
     model = _model()
-    chunks = _speech_chunks(wave)
     t0 = time.time()
     segs, capped = [], 0
     for i in range(0, len(chunks), BATCH):

@@ -60,21 +60,41 @@ def main():
     todo = [e for e in eps if e["guid"] not in done]
     print(f"BATCH_POD shard={a.shard} episodes={len(eps)} done={len(done)} todo={len(todo)}", flush=True)
 
+    # Prefetch pipeline: fetch + decode + VAD all happen on CPU worker threads, so the GPU
+    # only ever sees ready-chunked audio. Queue holds (ep, dur, chunks, fetch_s, vad_s);
+    # chunks carry the speech audio in RAM (~250-350MB per 100-min episode) — keep --ahead small.
+    import concurrent.futures as _cf
+    import soundfile as sf
+
     q = queue.Queue(maxsize=max(1, a.ahead))
 
+    def prep(ep):
+        wav = os.path.join(wavdir, ep["guid"] + ".wav")
+        t0 = time.time()
+        src = wav + ".src"
+        W._fetch(ep["audio_url"], src)
+        W._to_wav(src, wav)
+        os.remove(src)
+        fetch_s = round(time.time() - t0, 1)
+        t1 = time.time()
+        wave, sr = sf.read(wav, dtype="float32")
+        if wave.ndim > 1:
+            wave = wave.mean(axis=1)
+        assert sr == 16000, f"bad sr {sr}"
+        dur = len(wave) / sr
+        chunks = W._speech_chunks(wave)
+        os.remove(wav)
+        return ep, dur, chunks, fetch_s, round(time.time() - t1, 1)
+
     def producer():
-        for ep in todo:
-            wav = os.path.join(wavdir, ep["guid"] + ".wav")
-            try:
-                t0 = time.time()
-                if not os.path.exists(wav):
-                    src = wav + ".src"
-                    W._fetch(ep["audio_url"], src)
-                    W._to_wav(src, wav)
-                    os.remove(src)
-                q.put((ep, wav, round(time.time() - t0, 1)))
-            except Exception as ex:  # noqa: BLE001 — one bad episode must not sink the batch
-                led(ledger, {"guid": ep["guid"], "status": "fetch_error", "error": str(ex)[:300]})
+        with _cf.ThreadPoolExecutor(max_workers=max(1, a.ahead)) as ex_pool:
+            futs = {ex_pool.submit(prep, ep): ep for ep in todo}
+            for fut in _cf.as_completed(futs):
+                ep = futs[fut]
+                try:
+                    q.put(fut.result())
+                except Exception as ex:  # noqa: BLE001 — one bad episode must not sink the batch
+                    led(ledger, {"guid": ep["guid"], "status": "fetch_error", "error": str(ex)[:300]})
         q.put(None)
 
     threading.Thread(target=producer, daemon=True).start()
@@ -86,9 +106,9 @@ def main():
         item = q.get()
         if item is None:
             break
-        ep, wav, fetch_s = item
+        ep, dur, chunks, fetch_s, vad_s = item
         try:
-            rec = W.transcribe_core(wav, language=a.language)
+            rec = W.transcribe_core(None, language=a.language, pre=(dur, chunks))
             timing = rec.pop("_timing", {})
             out_rec = {"guid": ep["guid"], "title": ep.get("title"), **rec}
             with open(os.path.join(a.out, ep["guid"] + ".json"), "w") as f:
@@ -98,16 +118,11 @@ def main():
             n_ok += 1
             led(ledger, {"guid": ep["guid"], "status": "ok", "dur_s": rec["duration"],
                          "words": words, "segs": len(rec["segments"]), "fetch_s": fetch_s,
-                         "transcribe_s": timing.get("transcribe_s"), "rt_x": timing.get("rt_factor"),
-                         "cap_flagged": timing.get("cap_flagged")})
+                         "vad_s": vad_s, "transcribe_s": timing.get("transcribe_s"),
+                         "rt_x": timing.get("rt_factor"), "cap_flagged": timing.get("cap_flagged")})
         except Exception as ex:  # noqa: BLE001
             n_err += 1
             led(ledger, {"guid": ep["guid"], "status": "transcribe_error", "error": str(ex)[:300]})
-        finally:
-            try:
-                os.remove(wav)
-            except OSError:
-                pass
     wall = time.time() - t_start
     print(f"BATCH_DONE ok={n_ok} err={n_err} audio_hrs={audio_s/3600:.2f} wall_s={wall:.0f} "
           f"sustained_rt={audio_s/max(wall,1):.0f}x", flush=True)

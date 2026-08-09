@@ -42,6 +42,12 @@ except ImportError:
     _ta = types.ModuleType("torchaudio")
     _ta.__version__ = "0.0.0+stub"
     sys.modules["torchaudio"] = _ta
+    import silero_vad  # noqa: F401  — binds the stub inside silero's modules while it exists
+    # Then remove the stub: transformers (imported by tensorrt_llm.llmapi) probes
+    # importlib.util.find_spec("torchaudio"), which raises ValueError on a spec-less
+    # sys.modules entry. With the stub gone, find_spec truthfully reports "absent";
+    # silero keeps its module-level reference and works regardless.
+    del sys.modules["torchaudio"]
 
 EXAMPLE_DIR = os.environ.get("EXAMPLE_DIR", "/opt/whisper-example")
 ENGINE_DIR = os.environ.get("ENGINE_DIR", "/engines/eng_turbo_int8")

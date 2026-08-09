@@ -6,7 +6,6 @@
 set -u
 set -x
 trap 'code=$?; echo "BOOT_EXIT code=$code"; sleep 120' EXIT
-export LD_LIBRARY_PATH="/usr/local/lib/python3.12/dist-packages/nvidia/cu13/lib:${LD_LIBRARY_PATH:-}"
 export CKPT_DIR="${CKPT_DIR:-/opt/whisper-example/ckpt_turbo_int8}"
 export EXAMPLE_DIR="${EXAMPLE_DIR:-/opt/whisper-example}"
 export ENGINE_BASE="${ENGINE_BASE:-/engines}"

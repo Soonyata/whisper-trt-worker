@@ -130,11 +130,15 @@ def _vad():
     return _VAD
 
 
-def _speech_chunks(wave):
-    """silero speech spans → greedy-packed chunks of ≤30s with real start offsets (seconds)."""
+def _speech_chunks(wave, model=None):
+    """silero speech spans → greedy-packed chunks of ≤30s with real start offsets (seconds).
+
+    model: optional silero model (jit or OnnxWrapper). Batch harnesses pass PER-THREAD
+    instances — silero models are stateful, so sharing across threads corrupts results."""
     import torch
     from silero_vad import get_speech_timestamps
-    spans = get_speech_timestamps(torch.from_numpy(wave), _vad(), sampling_rate=SR,
+    spans = get_speech_timestamps(torch.from_numpy(wave), model if model is not None else _vad(),
+                                  sampling_rate=SR,
                                   min_silence_duration_ms=500, speech_pad_ms=200)
     chunks = []                                            # (start_sample, end_sample)
     for sp in spans:

@@ -68,12 +68,33 @@ def main():
 
     q = queue.Queue(maxsize=max(1, a.ahead))
 
-    # silero's torch-JIT model is NOT safe for concurrent init/forward across threads
-    # (v2 validation segfaulted, exit 139): warm it once on the main thread, then
-    # serialize VAD behind a lock. Fetch+decode still overlap; VAD ~25s/ep serialized
-    # still feeds a ~12s/ep GPU at ~240x sustained.
-    W._vad()
-    vad_lock = threading.Lock()
+    # VAD strategy, best-first:
+    #   onnx-per-thread — each prep thread gets its OWN OnnxWrapper (silero models are STATEFUL:
+    #     LSTM state persists across calls, so sharing across threads corrupts results; and the
+    #     torch-JIT model segfaults under concurrent init/forward — exit 139, val2). Lockless →
+    #     VAD parallelizes and the GPU stays fed.
+    #   jit-locked fallback — if onnxruntime is unavailable/broken: warm the jit model once on
+    #     the main thread, serialize calls behind a lock (val4-proven, ~150-170x sustained).
+    _tl = threading.local()
+    try:
+        import onnxruntime  # noqa: F401 — probe only; broken installs raise here
+        from silero_vad import load_silero_vad as _load_sv
+        vad_lock = None
+
+        def _vad_model():
+            m = getattr(_tl, "vad", None)
+            if m is None:
+                m = _load_sv(onnx=True)
+                _tl.vad = m
+            return m
+        print("VAD_MODE onnx-per-thread", flush=True)
+    except Exception as _ex:  # noqa: BLE001 — any onnxruntime breakage degrades gracefully
+        W._vad()
+        vad_lock = threading.Lock()
+
+        def _vad_model():
+            return W._vad()
+        print(f"VAD_MODE jit-locked ({type(_ex).__name__})", flush=True)
 
     def prep(ep):
         wav = os.path.join(wavdir, ep["guid"] + ".wav")
@@ -89,8 +110,11 @@ def main():
             wave = wave.mean(axis=1)
         assert sr == 16000, f"bad sr {sr}"
         dur = len(wave) / sr
-        with vad_lock:
-            chunks = W._speech_chunks(wave)
+        if vad_lock is None:
+            chunks = W._speech_chunks(wave, model=_vad_model())
+        else:
+            with vad_lock:
+                chunks = W._speech_chunks(wave, model=_vad_model())
         os.remove(wav)
         return ep, dur, chunks, fetch_s, round(time.time() - t1, 1)
 

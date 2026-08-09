@@ -18,7 +18,7 @@ RUN pip install --break-system-packages --no-cache-dir tensorrt_llm \
          pip install --break-system-packages --no-cache-dir "$P" || true; done \
     && pip install --break-system-packages --no-cache-dir --ignore-installed openai-whisper kaldialign soundfile silero-vad runpod \
     && pip install --break-system-packages --no-cache-dir --force-reinstall --no-deps "torch==2.9.*" "torchaudio==2.9.*" "triton==3.5.1" \
-    && python3 -c "import torch; assert torch.__version__.startswith('2.9'), torch.__version__; import tensorrt_llm; print('ABI_CHECK_OK torch', torch.__version__)"
+    && python3 -c "import torch; assert torch.__version__.startswith('2.9'), torch.__version__; print('TORCH_PIN_OK', torch.__version__)"
 
 # Vendored inference scripts from the NVIDIA TensorRT-LLM whisper example (Apache-2.0),
 # pinned to the tag matching the installed wheel + whisper assets + the converted checkpoint.

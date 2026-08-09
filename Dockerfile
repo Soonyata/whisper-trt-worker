@@ -18,8 +18,21 @@ RUN pip install --break-system-packages --no-cache-dir tensorrt_llm \
          pip install --break-system-packages --no-cache-dir "$P" || true; done \
     && pip install --break-system-packages --no-cache-dir --ignore-installed openai-whisper kaldialign soundfile silero-vad runpod \
     && pip uninstall --break-system-packages -y torchao torch-c-dlpack-ext torchvision || true
-RUN pip install --break-system-packages --no-cache-dir --force-reinstall "torch==2.9.*" "torchaudio==2.9.*" "triton==3.5.1" \
-    && python3 -c "import torch; assert torch.__version__.startswith('2.9'), torch.__version__; import torch._inductor.lowering, torch._inductor.kernel.custom_op; print('TORCH_STACK_OK', torch.__version__)"
+# SCORCHED-EARTH torch fix (pod-certified 2026-08-09): --ignore-installed above overlays torch 2.13
+# files; force-reinstall of 2.9 leaves 2.13-ONLY ORPHANS (e.g. _inductor/kernel/custom_op.py) that
+# dynamo's submodule walker imports -> circular-import crash. Physically remove the trees, then
+# clean-install the pinned triple. Check imports only modules that EXIST in 2.9.
+RUN pip uninstall --break-system-packages -y torch torchaudio triton pytorch-triton || true
+RUN rm -rf /usr/local/lib/python3.12/dist-packages/torch \
+           /usr/local/lib/python3.12/dist-packages/torchgen \
+           /usr/local/lib/python3.12/dist-packages/functorch \
+           /usr/local/lib/python3.12/dist-packages/torch-*.dist-info \
+           /usr/local/lib/python3.12/dist-packages/torchaudio* \
+           /usr/local/lib/python3.12/dist-packages/triton \
+           /usr/local/lib/python3.12/dist-packages/triton-*.dist-info \
+           /usr/local/lib/python3.12/dist-packages/pytorch_triton* \
+    && pip install --break-system-packages --no-cache-dir "torch==2.9.*" "torchaudio==2.9.*" "torchvision==0.24.*" "triton==3.5.1" pillow \
+    && python3 -c "import torch; assert torch.__version__.startswith('2.9'), torch.__version__; import torch._inductor.lowering, torchvision; print('TORCH_CLEAN_OK', torch.__version__, torchvision.__version__)"
 
 # Vendored inference scripts from the NVIDIA TensorRT-LLM whisper example (Apache-2.0),
 # pinned to the tag matching the installed wheel + whisper assets + the converted checkpoint.

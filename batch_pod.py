@@ -50,6 +50,22 @@ def main():
 
     eps = [json.loads(l) for l in open(a.episodes) if l.strip()]
     eps = [e for k, e in enumerate(eps) if k % shard_n == shard_i]
+    # Crash-resume (Priority-1 finding): a container restart wipes the local ledger, so a
+    # restarted pod would redo its whole shard. If S3 sync is on and there is no local ledger,
+    # pull this shard's ledger down from the bucket first — restarts resume instead of redoing.
+    if a.s3_sync and not os.path.exists(ledger):
+        try:
+            import boto3 as _b3
+            _c = _b3.client("s3", endpoint_url=os.environ["RUNPOD_S3_ENDPOINT"],
+                            region_name=os.environ.get("RUNPOD_S3_REGION", ""),
+                            aws_access_key_id=os.environ["RUNPOD_S3_ACCESS_KEY"],
+                            aws_secret_access_key=os.environ["RUNPOD_S3_SECRET"])
+            _pfx = os.environ.get("RUNPOD_S3_PREFIX", "batch")
+            _c.download_file(os.environ["RUNPOD_S3_BUCKET"],
+                             f"{_pfx}/ledger-{shard_i}of{shard_n}.jsonl", ledger)
+            print("LEDGER_RESUMED_FROM_S3", flush=True)
+        except Exception:
+            pass  # no prior ledger — fresh shard
     done = set()
     if os.path.exists(ledger):
         for l in open(ledger):

@@ -214,7 +214,12 @@ def _fetch(url, path):
                          region_name=os.environ.get("RUNPOD_S3_REGION", ""),
                          aws_access_key_id=os.environ["RUNPOD_S3_ACCESS_KEY"],
                          aws_secret_access_key=os.environ["RUNPOD_S3_SECRET"])
-        c.download_file(bucket, key, path)
+        # STREAMED get_object, NOT download_file: RunPod S3 403s HeadObject (observed
+        # 2026-08-10; download_file HEADs first). GET works — stream it.
+        o = c.get_object(Bucket=bucket, Key=key)
+        with open(path, "wb") as f:
+            for chunk in iter(lambda: o["Body"].read(1 << 20), b""):
+                f.write(chunk)
         return
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (podcast-transcriber)"})
     with urllib.request.urlopen(req, timeout=900) as r, open(path, "wb") as f:

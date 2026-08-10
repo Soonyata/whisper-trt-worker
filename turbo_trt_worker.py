@@ -204,6 +204,18 @@ def transcribe_core(audio_path, language="en", pre=None):
 
 
 def _fetch(url, path):
+    if url.startswith("s3://"):
+        # local-media lane (2026-08-10): jobs may point at the run bucket directly —
+        # presigned URLs are NOT supported by RunPod's S3 API (403), but batch pods already
+        # carry S3 creds via env injection, so fetch with boto3 instead.
+        import boto3
+        bucket, key = url[5:].split("/", 1)
+        c = boto3.client("s3", endpoint_url=os.environ["RUNPOD_S3_ENDPOINT"],
+                         region_name=os.environ.get("RUNPOD_S3_REGION", ""),
+                         aws_access_key_id=os.environ["RUNPOD_S3_ACCESS_KEY"],
+                         aws_secret_access_key=os.environ["RUNPOD_S3_SECRET"])
+        c.download_file(bucket, key, path)
+        return
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (podcast-transcriber)"})
     with urllib.request.urlopen(req, timeout=900) as r, open(path, "wb") as f:
         while (b := r.read(1 << 20)):

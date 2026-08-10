@@ -25,6 +25,15 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import turbo_trt_worker as W  # noqa: E402  — the worker IS the engine room; this file only feeds it
 
 
+def safe_name(guid):
+    """Filesystem/S3-safe token from a guid. RSS guids are often URLS (New Books Network:
+    'https://newbooksnetwork.com/?p=78583') — slashes/queries explode paths and S3 keys
+    (Priority-1 finding #5). The RAW guid stays canonical in ledgers + transcript JSON."""
+    import hashlib, re
+    t = re.sub(r"[^A-Za-z0-9._-]", "_", guid)[:90]
+    return t + "-" + hashlib.sha1(guid.encode()).hexdigest()[:8]
+
+
 def led(path, row):
     with open(path, "a") as f:
         f.write(json.dumps(row) + "\n")
@@ -139,7 +148,7 @@ def main():
         print(f"VAD_MODE jit-locked ({type(_ex).__name__})", flush=True)
 
     def prep(ep):
-        wav = os.path.join(wavdir, ep["guid"] + ".wav")
+        wav = os.path.join(wavdir, safe_name(ep["guid"]) + ".wav")
         t0 = time.time()
         src = wav + ".src"
         W._fetch(ep["audio_url"], src)
@@ -186,7 +195,7 @@ def main():
             rec = W.transcribe_core(None, language=a.language, pre=(dur, chunks))
             timing = rec.pop("_timing", {})
             out_rec = {"guid": ep["guid"], "title": ep.get("title"), **rec}
-            with open(os.path.join(a.out, ep["guid"] + ".json"), "w") as f:
+            with open(os.path.join(a.out, safe_name(ep["guid"]) + ".json"), "w") as f:
                 json.dump(out_rec, f)
             words = sum(len(s["text"].split()) for s in rec["segments"])
             audio_s += rec["duration"]
@@ -195,7 +204,8 @@ def main():
                          "words": words, "segs": len(rec["segments"]), "fetch_s": fetch_s,
                          "vad_s": vad_s, "transcribe_s": timing.get("transcribe_s"),
                          "rt_x": timing.get("rt_factor"), "cap_flagged": timing.get("cap_flagged")})
-            s3_push(os.path.join(a.out, ep["guid"] + ".json"), f"{s3_prefix}/{ep['guid']}.json" if s3_prefix else "")
+            s3_push(os.path.join(a.out, safe_name(ep["guid"]) + ".json"),
+                    f"{s3_prefix}/{safe_name(ep['guid'])}.json" if s3_prefix else "")
             s3_push(ledger, ledger_key)
         except Exception as ex:  # noqa: BLE001
             n_err += 1

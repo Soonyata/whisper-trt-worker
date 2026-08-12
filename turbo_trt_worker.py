@@ -204,6 +204,27 @@ def transcribe_core(audio_path, language="en", pre=None):
 
 
 def _fetch(url, path):
+    if url.startswith("mega:"):
+        # cloud-direct lane (2026-08-12): fetch straight from MEGA at datacenter speed via
+        # MEGAcmd, authenticated by a SESSION TOKEN env-injected at pod launch (mega-login
+        # $MEGA_SESSION in bootstrap). A session token cannot change the account password
+        # and is revocable per-session (mega-killsession) — never ship the password.
+        # mega-get's local-name semantics vary, so download into a scratch dir and move.
+        import shutil
+        import subprocess
+        tmp = path + ".megadl"
+        os.makedirs(tmp, exist_ok=True)
+        try:
+            p = subprocess.run(["mega-get", url[5:], tmp],
+                               capture_output=True, text=True, timeout=7200)
+            got = os.listdir(tmp)
+            if p.returncode != 0 or len(got) != 1:
+                raise RuntimeError(f"mega-get rc={p.returncode} files={got} "
+                                   f"err={(p.stderr or '')[-200:]}")
+            os.replace(os.path.join(tmp, got[0]), path)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        return
     if url.startswith("s3://"):
         # local-media lane (2026-08-10): jobs may point at the run bucket directly —
         # presigned URLs are NOT supported by RunPod's S3 API (403), but batch pods already
